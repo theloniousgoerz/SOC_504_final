@@ -1,0 +1,633 @@
+---
+title: "Research Report SOC 504"
+subtitle: "Applied Social Statistics"
+author: 
+- name: [Thelonious Goerz]
+  affiliation: University of Washington
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+## Set knitr options here
+knitr::opts_chunk$set(echo = FALSE,
+                      comment = NA, 
+                      cache = TRUE,
+                      warning = FALSE,
+                      message = FALSE, 
+                      cache.lazy = FALSE
+                      )
+
+```
+
+```{r libraries, include=FALSE}
+## Load libraries
+library(tidycensus)
+library(tidyverse)
+options(tigris_use_cache = TRUE)
+library(mapview)
+library(memisc)
+
+## api key here census_api_key("HERE") ## Uncomment for use. 
+
+```
+
+## Introduction
+
+In this research report I will conduct an analysis on housing, race, and income. Demographers and sociologists have long been interested in the relationship between housing and income, for its ubiquity in American life and its important contribution to wealth building [@hirsch2009making;@desmond2012eviction]. Housing is not only an important method of making the middle class, but it dually provides shelter and a way for individuals to leverage the capital in their homes should they need it @adelman2004neighborhood. 
+
+Though these mechanisms are appealing and indeed robust, the same privileges have not been extended to all ethnoracial groups. Historically, through redlinging and discrimination, African-Americans have been locked out of the legitimate housing market and resigned to derelicht buildings or undesirable neighborhoods @coates2014case. Fundamentally, this has changed the ways in which wealth has been distributed throughout the population and its effects are still being felt today. Despite the passage of the Fair Housing Act, which ensured that people could not be discriminated against based on race when seeking housing, scholars have long noted that housing discrimination did not end @taylor2019race. More covert methods such as neighborhood covenanta and indirect discirmination have been responsible for discrimination in recent years. The job of sociologists now are to uncover the long-lasting effects of this discrimination as well as disentangle new methods of discrimination that may also be present. 
+## Data
+
+This report aims to test some of these long standing effects by using the American Community Survey. 
+
+The American Community Survey (ACS) is a representative sample of different households in America that ask general questions in 5-year intervals about identity, income, and other general social factors. According to the census website, this material has been collected for over 3 million households in the United States and has been in continuous operation for a number of years. Unlike the Census, it is collected every 5 years and is not an exact collection of each person but is an estimate of population and housing characteristics for the United States. 
+
+I use data at the census tract level in aggregate to understand these patterns. I look at all tracts in King County, which characterizes all of Seattle as well as some northern and southern suburbs. 
+
+I elect to omit the margins of error and rely on the estimates alone for the analysis. This merits its own discussion but is beyond the scope of this analysis. 
+
+## Hypotheses
+
+This motivates the research questions and hypotheses. 
+
+I broadly want to know how race affects homeownership and income. I will provide descriptive analyses and a simple linear regression describing the relationship between tenure of housing and income overall. Since one of the axioms of housing research is that staying in a house accumulates wealth over time, I will also validate that by establishing this connection. For the other tests I will use ANOVAs to understand the differences.
+
+#### H1: Homeownership rates for white and black residents is significantly different. 
+
+#### H2: Median tenure in years is significantly different in majority white versus non-white neighborhoods. 
+
+#### H3: Tract per capita income is correlated positively with tract homeownership rate. 
+
+```{r data, include=FALSE}
+## Load Data
+
+# We want to collect estimates of homeownership rate (by race), income aggregates, and homeownership tenure at the tract level. The tenure estimates are for homeowners. 
+## I also do a little bit of data cleaning to get it into a more readable and clear form. 
+## Note :: I create two different datasets, one with geometry and one without it. 
+
+ data <- get_acs(geography = "tract", # The tenure referes to homeowenrship. 
+        county = "King",
+        state = "WA", 
+        year = 2018,
+        survey = "acs5", 
+        variables = c(income_per_cap_blk = "B19301B_001", 
+                      income_per_cap_wht = "B19301A_001", 
+                      income_per_cap_total = "B19301_001", 
+                      total_pop_hown = "B25003_002", # this is by structure. 
+                      total_pop_blk_hown = "B25003B_002", 
+                      total_pop_wht_own = "B25003A_002",
+                      med_yr_moved_in = "B25039_002", 
+                      total_blk = "B02001_003", 
+                      total_wht = "B02001_002", 
+                      total_pop = "B01003_001",
+                      total_occu_units = "B25003_001"),
+        output = "wide", 
+        geometry = F)
+
+data <- data %>% na.omit() %>% # Clear NAs. 
+  mutate(blk_pct = total_blkE / total_popE, # Get the percent of the population that is black. 
+         wht_pct = total_whtE / total_popE, # Get the percent of the population that is white. 
+         maj_white = ifelse(wht_pct >= 0.51, "WHITE MAJ", "MAJ NON WHITE"), # Bin the tracts by majority racial group. 
+         median_tenure_yrs = 2020 - med_yr_moved_inE, # Get the median number of tenure years in count of actual years. 
+                       blk_hpct_of_all_hown = total_pop_blk_hownE / total_pop_hownE, # Get the percent of the homeowning pop that is black. 
+                       wht_pct_of_all_hown = total_pop_wht_ownE / total_pop_hownE,# Get the percent of the homeowning pop that is white. 
+         blk_hown_rate = total_pop_blk_hownE / total_occu_unitsE,
+         wht_hown_rate = total_pop_wht_ownE / total_occu_unitsE,
+         hown_rate = total_pop_hownE / total_occu_unitsE)
+
+## This is the data set that has geometry should I decide to create a map visualization. 
+data_geom <- get_acs(geography = "tract", # The tenure referes to homeowenrship. 
+        county = "King",
+        state = "WA", 
+        year = 2018,
+        survey = "acs5", 
+        variables = c(income_per_cap_blk = "B19301B_001", 
+                      income_per_cap_wht = "B19301A_001", 
+                      income_per_cap_total = "B19301_001", 
+                      total_pop_hown = "B25003_002", # this is by structure. 
+                      total_pop_blk_hown = "B25003B_002", 
+                      total_pop_wht_own = "B25003A_002",
+                      med_yr_moved_in = "B25039_002", 
+                      total_blk = "B02001_003", 
+                      total_wht = "B02001_002", 
+                      total_pop = "B01003_001",
+                      total_occu_units = "B25003_001"),
+        output = "wide", 
+        geometry = T)
+
+data_geom <- data_geom %>% na.omit() %>% # Clear NAs. 
+  mutate(blk_pct = total_blkE / total_popE, # Get the percent of the population that is black. 
+         wht_pct = total_whtE / total_popE, # Get the percent of the population that is white. 
+         maj_white = ifelse(wht_pct >= 0.51, "WHITE MAJ", "MAJ NON WHITE"), # Bin the tracts by majority racial group. 
+         median_tenure_yrs = 2020 - med_yr_moved_inE, # Get the median number of tenure years in count of actual years. 
+                       blk_hown_pct = total_pop_blk_hownE / total_pop_hownE, # Get the percent of the homeowning pop black. 
+                       wht_pct_hown = total_pop_wht_ownE / total_pop_hownE) # Get the percent of the homeowning pop that is white.
+
+data <- data %>% dplyr :: select(-income_per_cap_blkM, # Omitting margins of error for the scope of this analysis.
+                           -income_per_cap_whtM, # They are important for more concise demographic estimates. 
+                           -income_per_cap_totalM, # Discussion and transparency about this is included in the methods section.
+                           -total_pop_hownM,
+                           -total_pop_blk_hownM,
+                           -total_pop_wht_ownM,
+                           -med_yr_moved_inM,
+                           -total_blkM,
+                           -total_whtM,
+                           -total_pop_blk_hownM,
+                           -total_occu_unitsM, -total_popM)
+
+data_geom <- data_geom %>% dplyr :: select(-income_per_cap_blkM, # Omitting margins of error for the scope of this analysis.
+                           -income_per_cap_whtM, # They are important for more concise demographic estimates. 
+                           -income_per_cap_totalM, # Discussion and transparency about this is included in the methods section.
+                           -total_pop_hownM,
+                           -total_pop_blk_hownM,
+                           -total_pop_wht_ownM,
+                           -med_yr_moved_inM,
+                           -total_blkM,
+                           -total_whtM,
+                           -total_pop_blk_hownM,
+                           -total_occu_unitsM, -total_popM)
+```
+
+### Data Dictionary 
+Here I provide a data dictionary with descriptions for each variable. 
+
+```{r Dictionary }
+
+ codebook <- tibble(Variable = names(data),
+       Description = c("Goelocated Identification",
+                       "Census Tract Name", 
+                       "The per capita income of black individuals", 
+                       "The per capita income of white individuals",
+                       "The total income in the census tract per capita",
+                       "The total population of homeowners",
+                       "The total population of black homeowners",
+                       "The total population of white homeowners",
+                       "The median year that the population of the tract moved in",
+                       "The total estimated black population",
+                       "The total estimated white population",
+                       "The total estimated population",
+                       "The total count of occupied housing units",
+                       "Percent of the population that is black",
+                       "Percent of the population that is white",
+                       "Indicator variable of whether the population is majority white or not",
+                       "The median tenure of the neighborhood in years (refernce is 2020)",
+                       "The percent of the homeowning population that is black",
+                       "The percent of the homeowning population that is white",
+                       "Rate of homeownership of black people out of all occupied units",
+                        "Rate of homeownership of white individuals out of all occupied units", 
+                       "Overall Homeownership rate"),Class = sapply(data, class))
+(codebook) %>% knitr:: kable()
+
+```
+
+
+### Data Visualization 
+
+In this section I provide some exploratory data vizualization to understand the spread anc characteristics before analysis. 
+
+```{r}
+ ## Data visualization 
+ ## I also specify an object for specific colr palettes for these plots 
+ 
+ wes_palettes <- list(
+  BottleRocket1 = c("#A42820", "#5F5647", "#9B110E", "#3F5151", "#4E2A1E", "#550307", "#0C1707"),
+  BottleRocket2 = c("#FAD510", "#CB2314", "#273046", "#354823", "#1E1E1E"),
+  Rushmore1 = c("#E1BD6D", "#EABE94", "#0B775E", "#35274A" ,"#F2300F"),
+  Rushmore = c("#E1BD6D", "#EABE94", "#0B775E", "#35274A" ,"#F2300F"),
+  Royal1 = c("#899DA4", "#C93312", "#FAEFD1", "#DC863B"),
+  Royal2 = c("#9A8822", "#F5CDB4", "#F8AFA8", "#FDDDA0", "#74A089"),
+  Zissou1 = c("#3B9AB2", "#78B7C5", "#EBCC2A", "#E1AF00", "#F21A00"),
+  Darjeeling1 = c("#FF0000", "#00A08A", "#F2AD00", "#F98400", "#5BBCD6"),
+  Darjeeling2 = c("#ECCBAE", "#046C9A", "#D69C4E", "#ABDDDE", "#000000"),
+  Chevalier1 = c("#446455", "#FDD262", "#D3DDDC", "#C7B19C"),
+  FantasticFox1 = c("#DD8D29", "#E2D200", "#46ACC8", "#E58601", "#B40F20"),
+  Moonrise1 = c("#F3DF6C", "#CEAB07", "#D5D5D3", "#24281A"),
+  Moonrise2 = c("#798E87", "#C27D38", "#CCC591", "#29211F"),
+  Moonrise3 = c("#85D4E3", "#F4B5BD", "#9C964A", "#CDC08C", "#FAD77B"),
+  Cavalcanti1 = c("#D8B70A", "#02401B", "#A2A475", "#81A88D", "#972D15"),
+  GrandBudapest1 = c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236"),
+  GrandBudapest2 = c("#E6A0C4", "#C6CDF7", "#D8A499", "#7294D4"),
+  IsleofDogs1 = c("#9986A5", "#79402E", "#CCBA72", "#0F0D0E", "#D9D0D3", "#8D8680"),
+  IsleofDogs2 = c("#EAD3BF", "#AA9486", "#B6854D", "#39312F", "#1C1718")
+) # Adapted from [Karthik](https://github.com/karthik/wesanderson/blob/master/R/colors.R)
+ 
+ 
+ data %>% ggplot(aes(x = income_per_cap_totalE, fill = maj_white)) + geom_histogram(binwidth = 10000) + scale_fill_manual(values = wes_palettes$Chevalier1[1:6]) + theme_minimal() + 
+   ggtitle("Counts of tract by per cap income") +
+   ylab("Count") + xlab("Average Income in $10,000s")
+ 
+ 
+ data %>% 
+ ggplot(aes(x = total_popE, fill = maj_white)) + geom_histogram(binwidth = 1000) + 
+          scale_fill_manual(values = wes_palettes$Zissou1[1:4]) + ggtitle("King County Tract population by race") +
+   xlab("Total tract population in 1000s") +
+   ylab("Count") + theme_minimal()
+   
+  data %>% ggplot(aes(x = income_per_cap_totalE, fill = maj_white)) + geom_histogram(binwidth = 10000) + scale_fill_manual(values = wes_palettes$Chevalier1[1:6]) + theme_minimal() + 
+   ggtitle("Counts of tracts by per cap income by race") +
+   ylab("Count") + xlab("Average Income in $10,000s")
+  
+  
+## Distributions of Homeownership rate by Race.
+ 
+ data %>% ggplot(aes(x = hown_rate, fill = maj_white)) + geom_histogram() + theme_minimal() +
+  scale_fill_manual(values = wes_palettes$Darjeeling1[4:6]) + ggtitle("Homeownership rate in King County tracts by majority racial group") + 
+   ylab("Count") + xlab("Homeownership rate")
+
+```
+
+### Summary Statistics 
+
+ Here I generate summary statistics for a few of the most relevant variables. 
+ 
+```{r Summary statistics}
+library(gtsummary)
+
+table_data <- data %>% 
+  dplyr :: select(income_per_cap_totalE,hown_rate,
+                  blk_hown_rate,
+                  wht_hown_rate ,wht_pct, blk_pct, median_tenure_yrs,maj_white 
+                  ) %>% data.frame()
+
+tbl_summary(table_data,
+            label = list(income_per_cap_totalE ~"Inceome Per Capita", 
+                      hown_rate ~ "Homeownership Rate", 
+                      blk_hown_rate ~ "Homeownership Rate (Black)",
+                      wht_hown_rate ~ "Homeownership Rate (White)",
+                      wht_pct ~ "Proportion of the population (White)", 
+                      blk_pct ~ "Proportion of the population (Black)",
+                      median_tenure_yrs ~ "Median years lived in tract",
+                      maj_white ~ "Tract Majority Group"),
+            statistic = list(all_continuous() ~ "{mean} ({sd})",
+                             all_categorical() ~ "({n}) ({p})"))
+
+devtools::unload("gtsummary")
+```
+
+## Methods
+
+In the following section I fit an ANOVA model to test hypothesis two and a t-test to test hypothesis 2.. Next, I fit a linear regression model using OLS estimation to test hypothesis 3. For the simplicity of analysis, I elect to ignore the estimate margins of error -- especially since I am using 5-year estimates which are reasonably robust. 
+
+Affter fitting both sets of models, I look at the assumptions of each model and compare them for best fit. 
+
+## Analysis
+
+### Part I: Hypotheses one and two 
+
+```{r T test: Hypothesis 1: Data and plots }
+
+## Hypothesis 1
+## H1: Homeownership rates for white and black residents is significantly different. 
+
+data_t_test <- data %>% pivot_longer(cols = c(blk_hown_rate,wht_hown_rate), names_to = "race", values_to = "homeownership_rate") %>% dplyr:: select(NAME, race, homeownership_rate) # this code makes the base R t test just a little easier to work with. 
+
+## Visualization of the homeownership rate. 
+data_t_test %>%
+  ggplot(aes(x = homeownership_rate, fill = race)) + geom_histogram() + facet_wrap(~race) + theme_minimal() +
+  scale_fill_manual(values = wes_palettes$Zissou1[1:5]) + xlab("Homeownership Rate") + ylab("Count of tracts")
+## We can see from this data that they are not normal and so to some degreee we should automaatically be skeptical of the estimates. 
+
+```
+
+
+```{r T test: Hypothesis: Models }
+## Code for the model. 
+
+## Here I conduct a varaince test to check if there is a significant differnce in variance between groups. 
+(var.test(homeownership_rate ~ race, data = data_t_test))
+
+# The result indicates a highly significant P value, ao we include in the argument for our model that the variances are not equal. 
+
+ (ttest.hown.1 <- t.test(homeownership_rate ~ race, data = data_t_test, var.equal = F))
+```
+
+These results indicate that there is a statistically significant mean difference between King County tract level homeownership rates between white and black people. The P-value is highly statistically significant. Additionally, this test indicates that the confidence for the difference in means is `r ttest.hown.1$conf.int ` However, we might be very skeptical of these results considering that the distributions of these data are not normal, and thus we would need a more appropriate non-parametric test to get a better idea of the true results. Nevertheless, the extreme difference in the means is convincing to some degree. This test and data supports my hypothesis. 
+
+```{r ANOVA : Hypothesis 2 : Visualization }
+
+data %>% ggplot(aes(x = median_tenure_yrs, fill = maj_white)) + geom_histogram() + facet_wrap(~maj_white) + theme_minimal() +
+  scale_fill_manual(values = wes_palettes$GrandBudapest1[1:6]) ## Plotes of the distributions of the majority white and majority non-whte neighborhoods' median tenure in years. 
+
+## These plots look pretty good as far as normality goes, so we will consider that assumption satisfied. 
+
+```
+
+```{r ANOVA: Hypothesis 2: Models}
+## ANOVA 
+
+## Checking the difference in median tenure in years ~ majority ethnic group in the neighborhood. 
+
+aov_1 <- aov(median_tenure_yrs ~ maj_white,data = data) # Here we fit the model. 
+
+summary(aov_1) ## The code for model diagnostic charts. 
+
+```
+
+This model indicates that there is not a statistically significant difference in variance between the two differnt census tracts. The ANOVA test indicates that there is not a statistically significant difference in the means of the homeownership tenure length in years between majority white and majority non-white neighborhoods. There are a few possible explanations for this. One is that the binning of race into black and white may be accounting for this as King County is racially diverse with high rates of hispanic and asian populations. Furthermore, there may be a some other underlying mechanism that is accounring for the lack of difference. This test and data do not support my hypothesis that median homeownership tenure in years is statistically significantly different between majority non-white and white census tracts in King County. 
+
+```{r ANOVA: Hypothesis 2: Model Checks }
+
+## In this code chunk I check the model diagonstics for the fitted anova. 
+plot(aov_1)
+
+```
+
+According to these plots, the residuals versus fitted look good and seem to be centerd almost exactly on zero. The Quantile plot also looks reasonable, though there is an S-curve effect on the lower and upper quantiles which may be an issue. The scale-location plot also looks reasonable with no obvious outliers. The leverage also looks reasonable. The model looks to fit the assumption of homoskedacticity for the ANOVA model so we can conclude with a reasonable level of assumption that the model fit is good. 
+
+### Part II: Regression Analysis: Testing hypothesis three
+
+In this section we fit a liear regression model to test hypothesis three: that income is positively correlated with homeownership rate. Included is complete specification code and code for model fit and validation. 
+
+```{r Correlation plot for continuous variables, include=FALSE}
+data %>% dplyr :: select(-maj_white, -NAME,-GEOID) %>% cor # Here is the code for the massive correlation matrix for the data. 
+  
+```
+ 
+This matrix is very big so we are going to filter down the data into a more managable form that includes the varaibles that are theoretically important for our analysis. (See code appendix for full matrix of correlations).
+ 
+#### Data Prep for Regression
+
+Here I include some additional data wrangling to use in the LMs. And a filtered correlation matrix visualized. 
+ 
+```{r Data Prep for Multivariate Regression}
+## Data filtered for use in the model. 
+
+data %>% ## Here we take a look at the pairwise comparison for these data. 
+  dplyr :: select(income_per_cap_blkE,
+                  income_per_cap_whtE,
+                  income_per_cap_totalE,
+                  blk_hown_rate,
+                  wht_hown_rate,
+                  blk_pct,
+                  wht_pct,
+                  blk_hpct_of_all_hown,
+                  wht_pct_of_all_hown, 
+                  med_yr_moved_inE, total_occu_unitsE) %>% pairs
+
+data_lm <- data %>% ## filtered linear model data. 
+  dplyr :: select(NAME,income_per_cap_blkE,
+                  income_per_cap_whtE,
+                  income_per_cap_totalE,
+                  blk_hown_rate,
+                  wht_hown_rate,
+                  blk_pct,
+                  wht_pct,
+                  blk_hpct_of_all_hown,
+                  wht_pct_of_all_hown, 
+                  med_yr_moved_inE, total_occu_unitsE, 
+                  total_pop_hownE, maj_white,hown_rate) %>% mutate(hown_rate = (100 *hown_rate),
+                                                                   blk_pct = (100 *blk_pct), 
+                                                                   wht_pct = (100 *wht_pct)) # These are transformed to pct. 
+(data_lm)
+
+```
+
+#### Model Specification
+Now that we have the data filtered and paired down to what we need for analysis, we want to specify and fit a multivariate linear model.
+
+We will begin with two different models. A full model, which includes all of the relevant data and a simple linear model which includes only homeownership rate and per capita income. We will then go through these models to find the most parsimonious model in between. 
+
+(Simple Linear Regression)
+
+```{r Regression Models 1, results = "asis" }
+
+SLR <- lm(income_per_cap_totalE ~  hown_rate, data = data_lm) # code for the SLR model. 
+equatiomatic::extract_eq(SLR, 
+                         intercept = "beta") # Equation code. 
+## I add a bit of code to transform the homeownership rate into a percent rather than a proportion for simpler interpretation.
+```
+(Full Multiple Linear Regression)
+```{r Regression Models 2, results= "asis"}
+
+FM <- lm(income_per_cap_totalE ~ hown_rate + maj_white + 
+           total_occu_unitsE + med_yr_moved_inE +
+         blk_pct + wht_pct , data = data_lm) # code for the full model. 
+equatiomatic::extract_eq(FM,
+                         wrap = T, intercept = "beta") # Code for the full model equation. 
+
+```
+
+#### Model Visualization
+```{r Linear Regression: Model Visualization}
+## Here is the code to look at the SLR model to get an idea of the overall relationship. 
+
+data_lm %>%
+  ggplot(aes(y = income_per_cap_totalE, x = hown_rate, fill = maj_white, col = maj_white)) + geom_smooth() + geom_point() + theme_minimal() + scale_color_manual(values = wes_palettes$Darjeeling2) + scale_fill_manual(values = wes_palettes$Darjeeling1) + 
+  ggtitle(" Relationship between homeownrship income in King County tracts") + 
+  ylab("Income per capita") + xlab("Homeownership rate") 
+
+```
+
+Based off of this initial exploratory graph, the relationship looks like it is somewhat linear and positively correlated, though there is a bit of variability. 
+
+#### Initial Summaries 
+
+```{r SLR Model summary}
+## This is the code for the SLR model output and the summary and fitted values. 
+summary(SLR)
+
+fitted(SLR) %>% summary() # This shows the summary of the fitted values. 
+```
+
+This model shows us that homeownership rate is significantly positively correlated with per capita income in census tracts. Additionally, the value is significantly correlated with a p-value less than 0.01. The R-squared is passable but is not very good. 
+
+```{r Full Model Summary}
+## ode to look at the full model summary 
+summary(FM)
+
+fitted(FM) %>% summary()
+```
+
+The full model only achieves a modest increase in R squared, and the added coefficients are all statistically significant except for a neighborhood being majorit white compared to the reference category of being not majority white. Additionally, there might be a concrn of multicolinearity -- so, I will perform an exploratory PCA analysis with the White Majority variable dropped. 
+
+#### Model Selection 
+```{r Exploratory PCA}
+## Code for the PCA plot. 
+library(FactoMineR)
+
+PCA <- data_lm %>% dplyr :: select(-maj_white, -NAME) %>% PCA(graph = FALSE) ## PCA Code. 
+
+circle_plot <- FactoMineR::plot.PCA(PCA, choix = "varcor")
+
+circle_plot # Note, Maj White has been dropped because it is categorical. 
+```
+
+Based on the principle component analysis and the sheer amount of predictors added, it is reasonable to beleive that there is multicolinearity in the model. The graph validates that assumption. It seems that all of the income variables for different racial groups are essentially prediting the same information. The homeownership rate for black and white owners is also difficult to disaggragate. Median year moved in and total occupied units are also colinear. To decide what variables to drop more robustly, model selection based on selection and AIC and BIC is needed. 
+ 
+```{r Data qualitatively dropped from PCA}
+## Data qualitatively selected from the PCA model interpretation. 
+PCA_model <- lm(income_per_cap_totalE ~ hown_rate + med_yr_moved_inE + wht_pct + blk_pct, data = data_lm)
+ 
+```
+ 
+```{r Stepwise model selection: Regression}
+ ## Here is the code to perform a stepwise evaluation of the model. 
+
+forward <- step(SLR, direction = "forward",
+                scope = formula(income_per_cap_totalE ~ hown_rate + maj_white + 
+    total_occu_unitsE + med_yr_moved_inE + blk_pct + wht_pct))
+backward <- step(FM, direction = "backward")
+both <- step(FM, direction = "both")
+
+## Model table
+mtable <- mtable("SLR" = SLR, 
+                 "Full" = FM,
+                 "Forward" = forward,
+                 "Backward" = backward,
+                 "Both" = both, "PCA Model" = PCA_model,
+                 summary.stats = c("AIC", "BIC", "R-squared", "F","p","N"))
+(mtable)
+```
+
+Based on the results of the stepwise model seleciton, the best fitting model is the forward selected model (equal to the back and both). The r-squared values are also identical for the full and forward model. The PCA model is a little bit worse off than the stepwise model and a little better than the SLR. To adjudicate between models, I present a BIC and AIC chart as well as run an anova comparing the full and forward model to find the best fit. 
+
+```{r AIC and BIC tables}
+## Code for the table. 
+## Model names. 
+linear_models <- list("SLR" = SLR, 
+                 "Full" = FM,
+                 "Forward" = forward,
+                 "Backward" = backward,
+                 "Both" = both, "PCA Model" = PCA_model)
+## Table. 
+df <- data.frame(AIC = sapply(linear_models,AIC),
+                 BIC = sapply(linear_models,BIC))
+
+df[order(df$AIC),] # code for the table with the lowest model criterion first. 
+
+final_model <- forward
+```
+
+Now I compare the forward model with the full model. 
+
+```{r Model adjudication}
+## Code for an anova between the full and forward model. 
+
+anova(FM,final_model)
+```
+
+This ANOVA does not find a statistically significant different in variance between the full model and the forward selected model. In this instance I opt for the more parsimonious model which is the forward selected model. 
+
+```{r FInal Model Summary}
+summary(final_model)
+```
+
+The final model indicates that there is a statistically significant positive relationship between homeownership rate and per capita tract income. This model tells us that a one unit increase, holding all else constant, in homeownership corresponds to an increase in per capita income of `r final_model$coefficients[2]` dollars. 
+
+Median year moved in is also highly statistically significant. When holding all else constant, a one unit increase in the median tenure for a census tract corresponds to an `r final_model$coefficients[4]` dollar increase in per capita income holding all else constant. 
+
+There is an improvement on our R-squared from our SLR model too, which explains more of the data. Percent white and black are also significant as well as the number of units occupied, but are not directly relevant to this analysis. 
+
+Overall, the proposed relationship between homeownership and income is significant, and the coefficients support my third hypothesis that income and homeownership are positively correlated. 
+
+#### Robustness Checks
+
+```{r Outliers}
+## Here is the code for checking the robustness of the model against outliers. 
+
+outliers <- car ::influencePlot(final_model)
+
+## Code to remove outliers from the data and check the robustness. 
+(outliers)
+
+## Remove outliers 
+outlier_data <- data_lm %>% filter(!rownames(data_lm)%in%rownames(outliers))
+
+outlier_model <- lm(income_per_cap_totalE ~ hown_rate + wht_pct + med_yr_moved_inE + 
+    total_occu_unitsE + blk_pct, data = outlier_data) # Here is the LLM but re ran with the new data. 
+
+## The final outlier comparison. 
+
+mtable(Outlier = outlier_model, Final = final_model, 
+       summary.stats = c("AIC", "BIC", "R-squared", "F","p","N"))
+
+
+```
+
+Based on dropping the outliers, it does not change the significance of any of the coefficients and it does not drastically change the R-squared. Additionally, there is a bit of a reduction in AIC and BIC values but taken together, the final model still seems to be appropriate. 
+
+#### Model Assumptions 
+
+```{r Model Assumptions}
+## Here is the code for model assumptions. 
+plot(final_model)
+
+
+```
+
+The residuals versus fitted values do have a lot of variability and do not seem correlated, however they are not exactly centered on zero which is concerning. 
+ 
+ The Q-Q plot has a nice alignment for most of the data but is not very goot at predicting the higher quantile values. 
+ 
+ The scale-location plot also looks reasonable, though the line is pretty curved. 
+ 
+ The residuals versus leverage shows that there is a high concentration of values at the low end but it does not seem overly concerning. 
+
+```{r Other assumptions}
+## Look at heteroskedasticity. 
+data_lm %>%
+  ggplot(aes(y = income_per_cap_totalE, x = hown_rate, col = maj_white))  + geom_point() + theme_minimal() + scale_color_manual(values = wes_palettes$Darjeeling2) + scale_fill_manual(values = wes_palettes$Darjeeling1) + 
+  ggtitle(" Relationship between homeownrship rate and income in WA King County Tracts") + 
+  ylab("Income per capita") + xlab("Homeownership rate") 
+
+## Look at distribution of income values 
+data_lm %>% ggplot(aes(x = income_per_cap_totalE, fill = wes_palettes$Rushmore[1])) + geom_histogram() + ggtitle("Per Capita Income") + 
+  xlab("Income") + ylab("Count") + theme_minimal()
+```
+
+One core assumption of linear regression is that the data is homoskedastic. This plot of the raw data does not seem to meet that assumption and suggests that an estimation method other than OLS is needed. Additionlly, there is a wide spread of the data in general. 
+ 
+Another assumption of linear regression is that the data are normally distributed which is not the case here. The data may appear a bit normal but they are not summetrical and are skewed to the right. 
+
+Overall, the data and the analysis show that the estimation methods used here are likely not appropriate for the data. While they are useful, other data and estimation techniques must be used to gain a more complete understanding.
+
+```{r Final Check for predictive accuracy}
+## In this code we check the model prediction based on the input data from the census tract 42, which is in the U-district. 
+## Recall the model formula: income_per_cap_totalE ~ hown_rate + wht_pct + med_yr_moved_inE + total_occu_unitsE + blk_pct
+
+tract_42 <- data %>% filter(GEOID == "53033004200") %>%  dplyr ::select(hown_rate,wht_pct, blk_pct,med_yr_moved_inE,total_occu_unitsE) %>%
+  mutate(hown_rate = (hown_rate *100), 
+         blk_pct = (100 * blk_pct),
+         wht_pct = (100 * wht_pct))
+  data.frame() ## Code to select the relevant variable for prediction and to make the income variables percents. 
+  
+ (tract_42) ## Data 
+data %>% filter(GEOID == "53033004200") %>% dplyr :: select(income_per_cap_totalE) ## Tract 42 income
+  
+  
+## Prediction 
+prediction <- predict(final_model,tract_42, interval = "prediction")
+(prediction)
+```
+
+Here I provide a predictive analysis based on data from the U-district census tract 42. Census tract 42, is the University village shopping area aand the neighborhood surrounding. It has a high homeownership rate and a move in median of about 15 years. Demographically it is mostly white. The per capita income estimate for 2018 was about 72000 dollars. According to this model, the fitted value is        ```r prediction[1]``` with an upper prediction of ```r prediction[3]``` and a lower of ```r prediction[2]```. The predicted value is about 7000 dollars off the actual value and the prediction interval is very wide at ```r prediction[2] - prediction[3]``` dollars. While the model does predict well enough and contains our real value, the interval is very large. 
+
+## Discussion 
+In this analysis report I sought to address three hypotheses related to homeownership and race and income. 
+
+### H1: Homeownership rates for white and black residents is significantly different. 
+My analysis found that hypothesis one was supported with a statistically significant t-test. There were not significant issues with model fit or assumptions. 
+
+### H2: Median tenure in years is significantly different in majority white versus non-white neighborhoods. 
+My second hypothesis was not supported by the ANOVA test I ran. There were not significant issues with model fit or assumptions. 
+
+### H3: Tract per capita income is correlated positively with tract homeownership rate. 
+My third hypothesis was supported by my regression analysis but there are significant questions about the appropriateness of OLS and the assumptions required for linear regression. I found that among other things there was a statistically significant and positive correlation between homeownership rate and the per capita income of a census tract. Additionally, the most major covariate was the median years lived in a tract, which corresponded with a statistically significant increase in per capita income. Race covariates were also significant. 
+
+THe implications of this analysis show the importance of owning a home and tenure on per capita income. The data also suggest that there is a difference in homeownership rates between white and black populations. Further analysis is needed to understand the full link. Washington is a particularly white state, which also could be a potenail limitation in the data. Another limitation is the fact that the ACS are estimates rather than exact census counts which means that there are some variability in the data. Omitted values are also a potential issue -- given that the census omits counts for some groups when they are very small. 
+
+
+## Code Appendix
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
+
+## References
+
+
